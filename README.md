@@ -39,34 +39,34 @@ The module will try to determine which containers it has already started on subs
 Start one docker container running tomcat in each host of the web group and bind tomcat's listening port to 8080
 on the host:
 
-	- name: start tomcat
-	  hosts: web
-	  user: root
-	  tasks:
-	  - name: run tomcat servers
-	    docker: image=cove/tomcat7 command=/start-tomcat.sh ports=:8080
+  - name: start tomcat
+    hosts: web
+    user: root
+    tasks:
+    - name: run tomcat servers
+      docker: image=cove/tomcat7 command=/start-tomcat.sh ports=:8080
 
 The tomcat server's port is NAT'ed to a dynamic port on the host, but you can determine which port the server was
 mapped to using $DockerContainers:
 
-	- name: start tomcat 
-	  hosts: web
-	  user: root
-	  tasks:
-	  - name: run tomcat servers
-	    docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
-	  - name: Display IP address and port mappings for containers
-	    shell: echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
-	    with_items: $DockerContainers
+  - name: start tomcat
+    hosts: web
+    user: root
+    tasks:
+    - name: run tomcat servers
+      docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
+    - name: Display IP address and port mappings for containers
+      shell: echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
+      with_items: $DockerContainers
 
 Just as in the previous example, but iterates through the list of docker containers with a sequence:
 
-	- name: start tomcat
-	  hosts: web
-	  user: root
-	  vars:
-	  	start_containers_count: 5
-	  tasks:
+  - name: start tomcat
+    hosts: web
+    user: root
+    vars:
+      start_containers_count: 5
+    tasks:
     - name: run tomcat servers
       docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count={{start_containers_count}}
     - name: Display IP address and port mappings for containers
@@ -75,12 +75,12 @@ Just as in the previous example, but iterates through the list of docker contain
 
 Stop and remove all of the running tomcat containers:
 
-	- name: stop tomcat
-	  hosts: web
-	  user: root
-	  tasks:
-	  - name: stop tomcat servers
-	    docker: image=cove/tomcat7 command=/start-tomcat.sh state=absent
+  - name: stop tomcat
+    hosts: web
+    user: root
+    tasks:
+    - name: stop tomcat servers
+      docker: image=cove/tomcat7 command=/start-tomcat.sh state=absent
 
 Parameters
 ==========
