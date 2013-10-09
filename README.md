@@ -56,7 +56,7 @@ mapped to using $DockerContainers:
 	  - name: run tomcat servers
 	    action: docker image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
 	  - name: Display IP address and port mappings for containers
-	    action: shell echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.8080}
+	    shell: echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
 	    with_items: $DockerContainers
 
 Just as in the previous example, but iterates through the list of docker containers with a sequence:
@@ -67,11 +67,11 @@ Just as in the previous example, but iterates through the list of docker contain
 	  vars:
 	  	start_containers_count: 5
 	  tasks:
-	  - name: run tomcat servers
-	    action: docker image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=$start_containers_count
-	  - name: Display IP address and port mappings for containers
-	    local_action: shell echo Mapped to ${inventory_hostname}:${DockerContainers[${item}].NetworkSettings.PortMapping.8080}
-	    with_sequence: start=0 end=$start_containers_count
+    - name: run tomcat servers
+      docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count={{start_containers_count}}
+    - name: Display IP address and port mappings for containers
+      shell: echo Mapped to {{inventory_hostname}}:{{DockerContainers[${item}].NetworkSettings.PortMapping.Tcp.8080}}
+      with_sequence: start=0 end={{start_containers_count - 1}}
 
 Stop and remove all of the running tomcat containers:
 
