@@ -1,14 +1,14 @@
 Ansible Module for Docker
 =========================
 
-This module allows you to use [Ansible](http://ansible.cc) to provision and de-provision Linux containers using the
+This module allows you to use [Ansible](http://www.ansibleworks.com/) to provision and de-provision Linux containers using the
 [docker](http://docker.io) container engine. 
 
 Installation
 ============
 
 1. Install [docker](http://www.docker.io/gettingstarted/)
-2. Install [docker-py](https://github.com/dotcloud/docker-py) on the docker server, and/or on the host you will be
+1. Install [docker-py](https://github.com/dotcloud/docker-py) on the docker server, and/or on the host you will be
    running ansible playbooks from if you would like to use the docker remote API instead of ansible's SSH session. 
 
    <pre>
@@ -17,10 +17,10 @@ Installation
    sudo python setup.py install 
    </pre>
 
-   NB: In order to use the docker remote API  you will need to use `local_action` in your playbooks and set
-   the `docker_url` argument to `http://${inventory_hostname}`.
+   NB: In order to use the docker remote API you will need to use `local_action` in your playbooks, set
+   the `docker_url` argument to `http://${inventory_hostname}` and expose the remote API via HTTP protocol.
 
-2. Copy `docker-ansible.py` to your ansible module directory as `docker` (e.g. `/usr/local/share/ansbile/docker`)
+1. Copy `docker-ansible.py` to your ansible module directory as `docker` (e.g. `/usr/local/share/ansible/docker`)
 
    <pre>
    curl https://raw.github.com/cove/docker-ansible/master/docker-ansible.py > docker
@@ -165,7 +165,7 @@ Parameters
 <tr>
 <td>docker_url</td>
 <td>no</td>
-<td>http://127.0.0.1:4243</td>
+<td>unix://var/run/docker.sock</td>
 <td><ul></ul></td>
 <td>URL of docker host to issue commands to</td>
 </tr>
