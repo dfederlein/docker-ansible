@@ -82,7 +82,7 @@ options:
     description:
       - URL of docker host to issue commands to
     required: false
-    default: http://127.0.0.1:4243
+    default: unix://var/run/docker.sock
     aliases: []
   username:
     description:
@@ -176,18 +176,29 @@ def main():
             hostname        = dict(default=None),
             env             = dict(),
             dns             = dict(),
-            detach          = dict(default=True),
+            detach          = dict(default=True, type='bool'),
             state           = dict(default='present', choices=['absent', 'present', 'stop', 'kill', 'restart']),
-            debug           = dict(default=False)
+            debug           = dict(default=False, type='bool'),
+            privileged      = dict(default=False, type='bool'),
+            lxc_conf        = dict(default=None)
         )
     )
+
     count        = int(module.params.get('count'))
     image        = module.params.get('image')
     command      = module.params.get('command')
     ports = None
     if module.params.get('ports'):
         ports = module.params.get('ports').split(",")
-    volumes      = module.params.get('volumes')
+
+    binds = None
+    if module.params.get('volumes'):
+        binds = {}
+        vols = module.params.get('volumes').split(" ")
+        for vol in vols:
+            parts = vol.split(":")
+            binds[parts[0]] = parts[1]
+
     volumes_from = module.params.get('volumes_from')
     memory_limit = _human_to_bytes(module.params.get('memory_limit'))
     memory_swap  = module.params.get('memory_swap')
@@ -200,6 +211,15 @@ def main():
     detach       = module.params.get('detach')
     state        = module.params.get('state')
     debug        = module.params.get('debug')
+    privileged   = module.params.get('privileged')
+
+    lxc_conf     = None
+    if module.params.get('lxc_conf'):
+        lxc_conf = []
+        options = module.params.get('lxc_conf').split(" ")
+        for option in options:
+            parts = option.split(':')
+            lxc_conf.append({"Key": parts[0], "Value": parts[1]})
 
     failed = False
     changed = False
@@ -233,18 +253,19 @@ def main():
     stopped   = 0
     killed    = 0
 
+
     # start/stop images
     if state == "present":
         params = {'image':        image,
                   'command':      command,
                   'ports':        ports,
-                  'volumes':      volumes,
                   'volumes_from': volumes_from,
                   'mem_limit':    memory_limit,
                   'environment':  env,
                   'dns':          dns,
                   'hostname':     hostname,
-                  'detach':       detach}
+                  'detach':       detach,
+                  'privileged':   privileged}
 
         containers = []
 
@@ -253,13 +274,13 @@ def main():
             try:
                 containers = [docker_client.create_container(**params) for _ in range(delta)]
                 changed = True
-            except ValueError:
+            except:
                 docker_client.pull(image)
                 changed = True
                 containers = [docker_client.create_container(**params) for _ in range(delta)]
 
             for i in containers:
-                docker_client.start(i['Id'])
+                docker_client.start(i['Id'], lxc_conf=lxc_conf, binds=binds)
             details = [docker_client.inspect_container(i['Id']) for i in containers]
             for each in details:
                 running_containers.append(details)
