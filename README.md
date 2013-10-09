@@ -44,7 +44,7 @@ on the host:
 	  user: root
 	  tasks:
 	  - name: run tomcat servers
-	    action: docker image=cove/tomcat7 command=/start-tomcat.sh ports=:8080
+	    docker: image=cove/tomcat7 command=/start-tomcat.sh ports=:8080
 
 The tomcat server's port is NAT'ed to a dynamic port on the host, but you can determine which port the server was
 mapped to using $DockerContainers:
@@ -54,7 +54,7 @@ mapped to using $DockerContainers:
 	  user: root
 	  tasks:
 	  - name: run tomcat servers
-	    action: docker image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
+	    docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
 	  - name: Display IP address and port mappings for containers
 	    shell: echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
 	    with_items: $DockerContainers
@@ -79,8 +79,8 @@ Stop and remove all of the running tomcat containers:
 	  hosts: web
 	  user: root
 	  tasks:
-	  - name: run tomcat servers
-	    action: docker image=cove/tomcat7 command=/start-tomcat.sh state=absent
+	  - name: stop tomcat servers
+	    docker: image=cove/tomcat7 command=/start-tomcat.sh state=absent
 
 Parameters
 ==========
