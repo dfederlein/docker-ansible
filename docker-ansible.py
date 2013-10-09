@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 #
 # The MIT License (MIT)
-# 
+#
 # Copyright (c) 2013 Cove Schneider
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -44,13 +44,13 @@ options:
   command:
     description:
        - Set command to run in a container on startup
-    required: true
+    required: false
     default: null
     aliases: []
   ports:
     description:
       - Set private to public port mapping specification (e.g. ports=22,80 or ports=:8080 maps 8080 directly to host)
-    required: true
+    required: false
     default: null
     aliases: []
   volumes:
@@ -82,7 +82,7 @@ options:
     description:
       - URL of docker host to issue commands to
     required: false
-    default: http://127.0.0.1:4243
+    default: unix://var/run/docker.sock
     aliases: []
   username:
     description:
@@ -155,7 +155,7 @@ def _human_to_bytes(number):
 
     print "failed=True msg='Could not convert %s to integer'" % (number)
     sys.exit(1)
-            
+
 def _ansible_facts(container_list):
     return {"DockerContainers": container_list}
 
@@ -164,28 +164,41 @@ def main():
         argument_spec = dict(
             count           = dict(default=1),
             image           = dict(required=True),
-            command         = dict(required=True),
-            ports           = dict(required=True),
-            volumes         = dict(default={}),
-            volumes_from    = dict(default=str("")),
-            memory_limit    = dict(default=_human_to_bytes("256MB")),
+            command         = dict(required=False, default=None),
+            ports           = dict(required=False, default=None),
+            volumes         = dict(default=None),
+            volumes_from    = dict(default=None),
+            memory_limit    = dict(default=0),
             memory_swap     = dict(default=0),
-            docker_url      = dict(default='http://127.0.0.1:4243'),
-            user            = dict(default=""),
+            docker_url      = dict(default='unix://var/run/docker.sock'),
+            user            = dict(default=None),
             password        = dict(),
-            hostname        = dict(default=""),
+            hostname        = dict(default=None),
             env             = dict(),
             dns             = dict(),
-            detach          = dict(default=True),
+            detach          = dict(default=True, type='bool'),
             state           = dict(default='present', choices=['absent', 'present', 'stop', 'kill', 'restart']),
-            debug           = dict(default=False)
+            debug           = dict(default=False, type='bool'),
+            privileged      = dict(default=False, type='bool'),
+            lxc_conf        = dict(default=None)
         )
     )
+
     count        = int(module.params.get('count'))
     image        = module.params.get('image')
     command      = module.params.get('command')
-    ports        = module.params.get('ports').split(",")
-    volumes      = module.params.get('volumes')
+    ports = None
+    if module.params.get('ports'):
+        ports = module.params.get('ports').split(",")
+
+    binds = None
+    if module.params.get('volumes'):
+        binds = {}
+        vols = module.params.get('volumes').split(" ")
+        for vol in vols:
+            parts = vol.split(":")
+            binds[parts[0]] = parts[1]
+
     volumes_from = module.params.get('volumes_from')
     memory_limit = _human_to_bytes(module.params.get('memory_limit'))
     memory_swap  = module.params.get('memory_swap')
@@ -198,6 +211,15 @@ def main():
     detach       = module.params.get('detach')
     state        = module.params.get('state')
     debug        = module.params.get('debug')
+    privileged   = module.params.get('privileged')
+
+    lxc_conf     = None
+    if module.params.get('lxc_conf'):
+        lxc_conf = []
+        options = module.params.get('lxc_conf').split(" ")
+        for option in options:
+            parts = option.split(':')
+            lxc_conf.append({"Key": parts[0], "Value": parts[1]})
 
     failed = False
     changed = False
@@ -207,20 +229,16 @@ def main():
     msg = None
 
     # connect to docker server
-    if docker_url.port == None:
-        docker_url = urlparse(docker_url.geturl() + ":4243")
-    if docker_url.scheme == '':
-        docker_url = urlparse("http://" + docker_url.geturl())
     docker_client = docker.Client(base_url=docker_url.geturl())
 
     # don't support older versions
     docker_info = docker_client.info()
     if 'Version' in docker_info and docker_info['Version'] < "0.3.3":
         module.fail_json(changed=changed, msg="Minimum Docker version required is 0.3.3")
- 
+
     # determine which images/commands are running already
     for each in docker_client.containers():
-        if each["Image"].split(":")[0] == image.split(":")[0] and each["Command"].strip() == command.strip():
+        if each["Image"].split(":")[0] == image.split(":")[0] and (not command or each["Command"].strip() == command.strip()):
             details = docker_client.inspect_container(each['Id'])
             # XXX some quirk upstream
             if 'ID' in details:
@@ -235,32 +253,34 @@ def main():
     stopped   = 0
     killed    = 0
 
+
     # start/stop images
     if state == "present":
         params = {'image':        image,
                   'command':      command,
                   'ports':        ports,
-                  'volumes':      volumes,
                   'volumes_from': volumes_from,
                   'mem_limit':    memory_limit,
                   'environment':  env,
                   'dns':          dns,
                   'hostname':     hostname,
-                  'detach':       detach,}
+                  'detach':       detach,
+                  'privileged':   privileged}
 
         containers = []
- 
+
         # start more containers if we don't have enough
         if delta > 0:
             try:
                 containers = [docker_client.create_container(**params) for _ in range(delta)]
                 changed = True
-            except ValueError:
+            except:
                 docker_client.pull(image)
                 changed = True
                 containers = [docker_client.create_container(**params) for _ in range(delta)]
-    
-            docker_client.start(*[i['Id'] for i in containers])
+
+            for i in containers:
+                docker_client.start(i['Id'], lxc_conf=lxc_conf, binds=binds)
             details = [docker_client.inspect_container(i['Id']) for i in containers]
             for each in details:
                 running_containers.append(details)
@@ -269,11 +289,14 @@ def main():
 
         # stop containers if we have too many
         elif delta < 0:
-            docker_client.stop(*[i['Id'] for i in running_containers[0:abs(delta)]])
+            for i in running_containers[0:abs(delta)]:
+                docker_client.stop(i['Id'])
+
             changed = True
 
             try:
-                docker_client.wait(*[i['Id'] for i in running_containers[0:abs(delta)]])
+                for i in running_containers[0:abs(delta)]:
+                    docker_client.wait(i['Id'])
             except ValueError:
                 pass
 
@@ -286,7 +309,7 @@ def main():
                 if each["State"]["Running"] == False:
                     stopped = stopped + 1
             docker_client.remove_container(*[i['Id'] for i in details])
-        
+
         container_summary = running_containers
 
     # stop and remove containers
@@ -328,7 +351,7 @@ def main():
             if each["State"]["Running"] == False:
                 stopped = stopped + 1
 
-    # kill containers    
+    # kill containers
     elif state == "kill":
         docker_client.kill(*[i['Id'] for i in running_containers])
         changed = True
@@ -345,7 +368,7 @@ def main():
                 killed = killed + 1
         docker_client.remove_container(*[i['Id'] for i in details])
 
-    # restart containers    
+    # restart containers
     elif state == "restart":
         docker_client.restart(*[i['ID'] for i in running_containers])
         changed = True

@@ -178,7 +178,7 @@ Parameters
 </tr>
 <tr>
 <td>command</td>
-<td>yes</td>
+<td>no</td>
 <td></td>
 <td><ul></ul></td>
 <td>Set command to run in a container on startup</td>
@@ -199,7 +199,7 @@ Parameters
 </tr>
 <tr>
 <td>ports</td>
-<td>yes</td>
+<td>no</td>
 <td></td>
 <td><ul></ul></td>
 <td>Set private to public port mapping specification (e.g. ports=22,80 or ports=:8080 maps 8080 directly to host)</td>
