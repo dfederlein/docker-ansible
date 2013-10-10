@@ -179,6 +179,13 @@ def _wait_containers(client, containers):
     for i in containers:
         client.wait(i['Id'])
 
+def _inspect_container(client, id):
+    details = client.inspect_container(id)
+    if 'ID' in details:
+        details['Id'] = details['ID']
+        del details['ID']
+    return details
+
 def main():
     module = AnsibleModule(
         argument_spec = dict(
@@ -259,11 +266,7 @@ def main():
     # determine which images/commands are running already
     for each in docker_client.containers():
         if each["Image"].split(":")[0] == image.split(":")[0] and (not command or each["Command"].strip() == command.strip()):
-            details = docker_client.inspect_container(each['Id'])
-            # XXX some quirk upstream
-            if 'ID' in details:
-                details['Id'] = details['ID']
-                details['ID'] = None
+            details = _inspect_container(docker_client, each['Id'])
             running_containers.append(details)
             running_count = running_count + 1
 
@@ -301,7 +304,7 @@ def main():
 
             for i in containers:
                 docker_client.start(i['Id'], lxc_conf=lxc_conf, binds=binds)
-            details = [docker_client.inspect_container(i['Id']) for i in containers]
+            details = [_inspect_container(docker_client, i['Id']) for i in containers]
             for each in details:
                 running_containers.append(details)
                 if each["State"]["Running"] == True:
@@ -318,11 +321,8 @@ def main():
             except ValueError:
                 pass
 
-            details = [docker_client.inspect_container(i['Id']) for i in running_containers[0:abs(delta)]]
+            details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:abs(delta)]]
             for each in details:
-                # XXX some quirk upstream
-                if 'ID' in each:
-                    each['Id'] = each['ID']
                 running_containers = [i for i in running_containers if i['Id'] != each['Id']]
                 if each["State"]["Running"] == False:
                     stopped = stopped + 1
@@ -342,11 +342,8 @@ def main():
         except ValueError:
             pass
 
-        details = [docker_client.inspect_container(i['Id']) for i in running_containers[0:delta]]
+        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
         for each in details:
-            # XXX some quirk upstream
-            if 'ID' in each:
-                each['Id'] = each['ID']
             container_summary.append(details)
             if each["State"]["Running"] == False:
                 stopped = stopped + 1
@@ -363,11 +360,8 @@ def main():
         except ValueError:
             pass
 
-        details = [docker_client.inspect_container(i['Id']) for i in running_containers[0:delta]]
+        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
         for each in details:
-            # XXX some quirk upstream
-            if 'ID' in details:
-                details['Id'] = details['ID']
             container_summary.append(details)
             if each["State"]["Running"] == False:
                 stopped = stopped + 1
@@ -384,7 +378,7 @@ def main():
         except ValueError:
             pass
 
-        details = [docker_client.inspect_container(i['Id']) for i in running_containers[0:delta]]
+        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
         for each in details:
             container_summary.append(details)
             if each["State"]["Running"] == False:
@@ -400,7 +394,7 @@ def main():
 
         changed = True
 
-        details = [docker_client.inspect_container(i['Id']) for i in running_containers[0:delta]]
+        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
         for each in details:
             container_summary.append(details)
             if each["State"]["Running"] == True:
