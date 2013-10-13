@@ -57,7 +57,7 @@ mapped to using $DockerContainers:
   - name: run tomcat servers
     docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count=5
   - name: Display IP address and port mappings for containers
-    shell: echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
+    shell: echo Mapped to {{inventory_hostname}}:{{item.NetworkSettings.PortMapping.Tcp['8080']}}
     with_items: $DockerContainers
 ```
 
@@ -73,7 +73,7 @@ Just as in the previous example, but iterates through the list of docker contain
   - name: run tomcat servers
     docker: image=cove/tomcat7 command=/start-tomcat.sh ports=8080 count={{start_containers_count}}
   - name: Display IP address and port mappings for containers
-    shell: echo Mapped to {{inventory_hostname}}:{{DockerContainers[${item}].NetworkSettings.PortMapping.Tcp.8080}}
+    shell: echo Mapped to {{inventory_hostname}}:{{DockerContainers[{{item}}].NetworkSettings.PortMapping.Tcp['8080']}}
     with_sequence: start=0 end={{start_containers_count - 1}}
 ```
 
@@ -90,6 +90,7 @@ Stop and remove all of the running tomcat containers:
 
 Parameters
 ==========
+
 <table>
 <tr>
 <th class="head">parameter</th>
@@ -118,6 +119,13 @@ Parameters
 <td></td>
 <td><ul></ul></td>
 <td>Set environment variables</td>
+</tr>
+<tr>
+<td>docker_url</td>
+<td>no</td>
+<td>unix://var/run/docker.sock</td>
+<td><ul></ul></td>
+<td>URL of docker host to issue commands to</td>
 </tr>
 <tr>
 <td>image</td>
@@ -169,11 +177,18 @@ Parameters
 <td>Set container hostname</td>
 </tr>
 <tr>
-<td>docker_url</td>
+<td>lxc_conf</td>
 <td>no</td>
-<td>unix://var/run/docker.sock</td>
+<td></td>
 <td><ul></ul></td>
-<td>URL of docker host to issue commands to</td>
+<td>LXC config parameters,  e.g. lxc.aa_profile:unconfined</td>
+</tr>
+<tr>
+<td>ports</td>
+<td>no</td>
+<td></td>
+<td><ul></ul></td>
+<td>Set private to public port mapping specification (e.g. ports=22,80 or ports=:8080 maps 8080 directly to host)</td>
 </tr>
 <tr>
 <td>state</td>
@@ -204,10 +219,10 @@ Parameters
 <td>Set shared volume(s) from another container</td>
 </tr>
 <tr>
-<td>ports</td>
+<td>privileged</td>
 <td>no</td>
 <td></td>
 <td><ul></ul></td>
-<td>Set private to public port mapping specification (e.g. ports=22,80 or ports=:8080 maps 8080 directly to host)</td>
+<td>Set whether the container should run in privileged mode</td>
 </tr>
 </table>

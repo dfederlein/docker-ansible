@@ -3,6 +3,8 @@
 	<name>docker-ansible</name>
 	<comment></comment>
 	<projects>
+		<project>ansible</project>
+		<project>docker</project>
 		<project>docker-py</project>
 	</projects>
 	<buildSpec>

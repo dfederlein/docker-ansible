@@ -72,12 +72,6 @@ options:
     default: null
     aliases: []
     default: 256MB
-  memory_swap:
-    description:
-      - Set virtual memory swap space allocated to container
-    required: false
-    default: 0
-    aliases: []
   docker_url:
     description:
       - URL of docker host to issue commands to
@@ -125,7 +119,7 @@ options:
       - Set the state of the container
     required: false
     default: present
-    choices: [ "present", "stop", "absent", "kill", "restart" ]
+    choices: [ "present", "stopped", "absent", "killed", "restarted" ]
     aliases: []
   privileged:
     description:
@@ -143,10 +137,13 @@ author: Cove Schneider
 '''
 
 try:
+
     import sys
     import json
     import docker.client
+    from requests.exceptions import *
     from urlparse import urlparse
+
 except ImportError, e:
     print "failed=True msg='failed to import python module: %s'" % e
     sys.exit(1)
@@ -171,20 +168,148 @@ def _human_to_bytes(number):
 def _ansible_facts(container_list):
     return {"DockerContainers": container_list}
 
-def _stop_containers(client, containers):
-    for i in containers:
-        client.stop(i['Id'])
+class AnsibleDocker:
+    
+    counters = {'created':0, 'started':0, 'stopped':0, 'killed':0, 'removed':0, 'restarted':0, 'pull':0}
 
-def _wait_containers(client, containers):
-    for i in containers:
-        client.wait(i['Id'])
+    def __init__(self, module):
 
-def _inspect_container(client, id):
-    details = client.inspect_container(id)
-    if 'ID' in details:
-        details['Id'] = details['ID']
-        del details['ID']
-    return details
+        self.module = module
+    
+        # connect to docker server
+        docker_url = urlparse(module.params.get('docker_url'))
+        self.client = docker.Client(base_url=docker_url.geturl())
+    
+    def get_summary_counters_msg(self):
+
+        msg = ""
+        for k, v in self.counters.iteritems():
+            msg = msg + "%s %d " % (k, v)
+
+        return msg
+    
+    def increment_counter(self, name):
+
+        self.counters[name] = self.counters[name] + 1
+
+    def has_changed(self):
+
+        for k, v in self.counters.iteritems():
+            if v > 0:
+                return True
+
+        return False
+
+    def get_deployed_containers(self):
+
+        # determine which images/commands are running already
+        containers = self.client.containers()
+        image      = self.module.params.get('image')
+        command    = self.module.params.get('command')
+        deployed   = []
+
+        for i in containers:
+            if i["Image"].split(":")[0] == image.split(":")[0] and (not command or i["Command"].strip() == command.strip()):
+                details = self.client.inspect_container(i['Id'])
+                # XXX: some quirk in docker
+                if 'ID' in details:
+                    details['Id'] = details['ID']
+                    del details['ID']
+                deployed.append(details)
+
+        return deployed
+
+    def get_running_containers(self):
+
+        running = []
+        for i in self.get_deployed_containers():
+            if i['State']['Running'] == True:
+                running.append(i)
+
+        return running
+
+    def create_containers(self, count=1):
+
+        params = {'image':        self.module.params.get('image'),
+                  'command':      self.module.params.get('command'),
+                  'volumes_from': self.module.params.get('volumes_from'),
+                  'mem_limit':    _human_to_bytes(self.module.params.get('memory_limit')),
+                  'environment':  self.module.params.get('env'),
+                  'dns':          self.module.params.get('dns'),
+                  'hostname':     self.module.params.get('hostname'),
+                  'detach':       self.module.params.get('detach'),
+                  'privileged':   self.module.params.get('privileged'),
+                  }
+
+        if self.module.params.get('ports'):
+            params['ports'] = self.module.params.get('ports').split(",")
+           
+        def do_create(count, params):
+            results = []
+            for i in range(count):
+                result = self.client.create_container(**params)
+                self.increment_counter('created')
+                results.append(result)
+
+            return results
+
+        try:
+            containers = do_create(count, params)
+
+        except:
+            self.client.pull(params['image'])
+            self.increment_counter('pull')
+            containers = do_create(count, params)
+
+        return containers
+
+    def start_containers(self, containers):
+
+        binds = None
+        if self.module.params.get('volumes'):
+            binds = {}
+            vols = self.module.params.get('volumes').split(" ")
+            for vol in vols:
+                parts = vol.split(":")
+                binds[parts[0]] = parts[1]
+
+        lxc_conf = None
+        if self.module.params.get('lxc_conf'):
+            lxc_conf = []
+            options = self.module.params.get('lxc_conf').split(" ")
+            for option in options:
+                parts = option.split(':')
+                lxc_conf.append({"Key": parts[0], "Value": parts[1]})
+
+        for i in containers:
+                self.client.start(i['Id'], lxc_conf=lxc_conf, binds=binds)
+                self.increment_counter('started')
+
+    def stop_containers(self, containers):
+
+        for i in containers:
+            self.client.stop(i['Id'])
+            self.increment_counter('stopped')
+
+        return [self.client.wait(i['Id']) for i in containers]
+
+    def remove_containers(self, containers):
+
+        for i in containers:
+            self.client.remove_container(i['Id'])
+            self.increment_counter('removed')
+    
+    def kill_containers(self, containers):
+
+        for i in containers:
+            self.client.kill(i['Id'])
+            self.increment_counter('killed')
+
+    def restart_containers(self, containers):
+
+        for i in containers:
+            self.client.restart(i['Id'])
+            self.increment_counter('restarted')
 
 def main():
     module = AnsibleModule(
@@ -200,210 +325,81 @@ def main():
             docker_url      = dict(default='unix://var/run/docker.sock'),
             user            = dict(default=None),
             password        = dict(),
+            email           = dict(),
             hostname        = dict(default=None),
             env             = dict(),
             dns             = dict(),
             detach          = dict(default=True, type='bool'),
-            state           = dict(default='present', choices=['absent', 'present', 'stop', 'kill', 'restart']),
+            state           = dict(default='present', choices=['absent', 'present', 'stopped', 'killed', 'restarted']),
             debug           = dict(default=False, type='bool'),
             privileged      = dict(default=False, type='bool'),
             lxc_conf        = dict(default=None)
         )
     )
 
-    count        = int(module.params.get('count'))
-    image        = module.params.get('image')
-    command      = module.params.get('command')
-    ports = None
-    if module.params.get('ports'):
-        ports = module.params.get('ports').split(",")
+    try:
 
-    binds = None
-    if module.params.get('volumes'):
-        binds = {}
-        vols = module.params.get('volumes').split(" ")
-        for vol in vols:
-            parts = vol.split(":")
-            binds[parts[0]] = parts[1]
+        docker_client = AnsibleDocker(module)
+        state = module.params.get('state')
+        count = int(module.params.get('count'))
+    
+        if count < 1:
+            module.fail_json(msg="Count must be positive number")
+    
+        running_containers = docker_client.get_running_containers()
+        running_count = len(running_containers)
+        delta = count - running_count
+        deployed_containers = docker_client.get_deployed_containers()
+        facts = None
+        failed = False
+        changed = False
 
-    volumes_from = module.params.get('volumes_from')
-    memory_limit = _human_to_bytes(module.params.get('memory_limit'))
-    memory_swap  = module.params.get('memory_swap')
-    docker_url   = urlparse(module.params.get('docker_url'))
-    user         = module.params.get('user')
-    password     = module.params.get('password')
-    hostname     = module.params.get('hostname')
-    env          = module.params.get('env')
-    dns          = module.params.get('dns')
-    detach       = module.params.get('detach')
-    state        = module.params.get('state')
-    debug        = module.params.get('debug')
-    privileged   = module.params.get('privileged')
+        # start/stop images
+        if state == "present":
+    
+            # start more containers if we don't have enough
+            if delta > 0:
+                containers = docker_client.create_containers(delta)
+                docker_client.start_containers(containers)
+                
+            # stop containers if we have too many
+            elif delta < 0:
+                docker_client.stop_containers(running_containers[0:abs(delta)])
+                docker_client.remove_containers(running_containers[0:abs(delta)])
+            
+            facts = docker_client.get_running_containers()
+    
+        # stop and remove containers
+        elif state == "absent":
+            facts = docker_client.stop_containers(deployed_containers)
+            docker_client.remove_containers(containers)
+    
+        # stop containers
+        elif state == "stopped":
+            facts = docker_client.stop_containers(running_containers)
+    
+        # kill containers
+        elif state == "killed":
+            docker_client.kill_containers(running_containers)
+    
+        # restart containers
+        elif state == "restarted":
+            docker_client.restart_containers(running_containers)        
+    
+        msg = "%s container(s) running image %s with command %s" % \
+                (docker_client.get_summary_counters_msg(), module.params.get('image'), module.params.get('command'))
+        changed = docker_client.has_changed()
+    
+        module.exit_json(failed=failed, changed=changed, msg=msg, ansible_facts=_ansible_facts(facts))
 
-    lxc_conf     = None
-    if module.params.get('lxc_conf'):
-        lxc_conf = []
-        options = module.params.get('lxc_conf').split(" ")
-        for option in options:
-            parts = option.split(':')
-            lxc_conf.append({"Key": parts[0], "Value": parts[1]})
+    except docker.client.APIError as e:
+        changed = docker_client.has_changed()
+        module.exit_json(failed=True, changed=changed, msg="Docker API error: " + e.explanation)
 
-    failed = False
-    changed = False
-    container_summary  = []
-    running_containers = []
-    running_count = 0
-    msg = None
+    except RequestException as e:
+        changed = docker_client.has_changed()
+        module.exit_json(failed=True, changed=changed, msg=repr(e))
 
-    # connect to docker server
-    docker_client = docker.Client(base_url=docker_url.geturl())
-
-    # don't support older versions
-    docker_info = docker_client.info()
-    if 'Version' in docker_info and docker_info['Version'] < "0.3.3":
-        module.fail_json(changed=changed, msg="Minimum Docker version required is 0.3.3")
-
-    # determine which images/commands are running already
-    for each in docker_client.containers():
-        if each["Image"].split(":")[0] == image.split(":")[0] and (not command or each["Command"].strip() == command.strip()):
-            details = _inspect_container(docker_client, each['Id'])
-            running_containers.append(details)
-            running_count = running_count + 1
-
-    delta     = count - running_count
-    restarted = 0
-    started   = 0
-    stopped   = 0
-    killed    = 0
-
-
-    # start/stop images
-    if state == "present":
-        params = {'image':        image,
-                  'command':      command,
-                  'ports':        ports,
-                  'volumes_from': volumes_from,
-                  'mem_limit':    memory_limit,
-                  'environment':  env,
-                  'dns':          dns,
-                  'hostname':     hostname,
-                  'detach':       detach,
-                  'privileged':   privileged}
-
-        containers = []
-
-        # start more containers if we don't have enough
-        if delta > 0:
-            try:
-                containers = [docker_client.create_container(**params) for _ in range(delta)]
-                changed = True
-            except:
-                docker_client.pull(image)
-                changed = True
-                containers = [docker_client.create_container(**params) for _ in range(delta)]
-
-            for i in containers:
-                docker_client.start(i['Id'], lxc_conf=lxc_conf, binds=binds)
-            details = [_inspect_container(docker_client, i['Id']) for i in containers]
-            for each in details:
-                running_containers.append(details)
-                if each["State"]["Running"] == True:
-                    started = started + 1
-
-        # stop containers if we have too many
-        elif delta < 0:
-            _stop_containers(docker_client, running_containers[0:abs(delta)])
-
-            changed = True
-
-            try:
-                _wait_containers(docker_client, running_containers[0:abs(delta)])
-            except ValueError:
-                pass
-
-            details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:abs(delta)]]
-            for each in details:
-                running_containers = [i for i in running_containers if i['Id'] != each['Id']]
-                if each["State"]["Running"] == False:
-                    stopped = stopped + 1
-            for i in details:
-                docker_client.remove_container(i['Id'])
-
-        container_summary = running_containers
-
-    # stop and remove containers
-    elif state == "absent":
-        _stop_containers(docker_client, running_containers)
-
-        changed = True
-
-        try:
-            _wait_containers(docker_client, running_containers)
-        except ValueError:
-            pass
-
-        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
-        for each in details:
-            container_summary.append(details)
-            if each["State"]["Running"] == False:
-                stopped = stopped + 1
-        for i in details:
-            docker_client.remove_container(i['Id'])
-
-    # stop containers
-    elif state == "stop":
-        _stop_containers(docker_client, running_containers)
-        changed = True
-
-        try:
-            _wait_containers(docker_client, running_containers)
-        except ValueError:
-            pass
-
-        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
-        for each in details:
-            container_summary.append(details)
-            if each["State"]["Running"] == False:
-                stopped = stopped + 1
-
-    # kill containers
-    elif state == "kill":
-        for i in running_containers:
-            docker_client.kill(i['Id'])
-
-        changed = True
-
-        try:
-            _wait_containers(docker_client, running_containers)
-        except ValueError:
-            pass
-
-        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
-        for each in details:
-            container_summary.append(details)
-            if each["State"]["Running"] == False:
-                killed = killed + 1
-
-        for i in details:
-            docker_client.remove_container(i['Id'])
-
-    # restart containers
-    elif state == "restart":
-        for i in running_containers:
-            docker_client.restart(i['Id'])
-
-        changed = True
-
-        details = [_inspect_container(docker_client, i['Id']) for i in running_containers[0:delta]]
-        for each in details:
-            container_summary.append(details)
-            if each["State"]["Running"] == True:
-                restarted = restarted + 1
-
-    msg = "Started %d, stopped %d, killed %d, restarted %d container(s) running image %s with command %s" %\
-            (started, stopped, killed, restarted, image, command)
-
-    module.exit_json(failed=failed, changed=changed, msg=msg, ansible_facts=_ansible_facts(container_summary))
 
 # this is magic, see lib/ansible/module_common.py
 #<<INCLUDE_ANSIBLE_MODULE_COMMON>>
