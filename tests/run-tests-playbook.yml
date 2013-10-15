@@ -2,24 +2,27 @@
 - name: test docker ansbile
   hosts: test_group
   user: root
+  gather_facts: no
   tasks:
   - name: run 2 servers
     action: docker-ansible.py image=busybox command="sleep 30" ports=8080 count=2
-  - name: run 3 servers
-    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 count=3
+  - name: stopping servers
+    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=stopped
   - name: run 1 servers
     action: docker-ansible.py image=busybox command="sleep 30" ports=8080 count=1
   - name: Display IP address and port mappings for containers
-    action: shell echo Mapped to ${inventory_hostname}:${item.NetworkSettings.PortMapping.Tcp.8080}
+    action: shell echo Mapped to {{inventory_hostname}}:{{item.NetworkSettings.PortMapping.Tcp['8080']}} > /tmp/hi2.txt
     with_items: $DockerContainers
   - name: Display IP address and port mappings for containers with indexes
-    local_action: shell echo Mapped to ${inventory_hostname}:${DockerContainers[${item}].NetworkSettings.PortMapping.Tcp.8080}
+    action: shell echo Mapped to {{inventory_hostname}}:{{DockerContainers[{{item}}].NetworkSettings.PortMapping.Tcp.8080}}
     with_sequence: start=0 end=4
   - name: restart servers
-    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=restart
+    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=restarted
   - name: stop servers
-    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=stop
+    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=stopped
   - name: start servers
     action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=present count=1
   - name: kill servers
-    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=kill
+    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=killed
+  - name: kill servers
+    action: docker-ansible.py image=busybox command="sleep 30" ports=8080 state=killed
